@@ -1,0 +1,44 @@
+FROM alpine:3.19 AS builder
+
+# Install dependencies (gcc, wget, go)
+RUN apk add --no-cache gcc wget build-base && \
+	wget https://go.dev/dl/go1.22.3.linux-amd64.tar.gz && \
+	tar -C /usr/local -xzf go1.22.3.linux-amd64.tar.gz && \
+	rm go1.22.3.linux-amd64.tar.gz
+
+COPY go-1.22.3.patch /
+RUN cp -prf /usr/local/go /usr/local/go-patched && \
+	patch -p1 -d /usr/local/go-patched < /go-1.22.3.patch && \
+	rm /go-1.22.3.patch
+
+COPY awesome.go /unpatched/awesome.go
+COPY client1.c /unpatched/client1.c
+COPY client2.c /unpatched/client2.c
+
+COPY awesome.go /patched/awesome.go
+COPY client1.c /patched/client1.c
+COPY client2.c /patched/client2.c
+
+RUN cd /unpatched && \
+	/usr/local/go/bin/go build -o awesome.so -buildmode=c-shared awesome.go && \
+	gcc -o client1 client1.c ./awesome.so && \
+	gcc -o client2 client2.c -ldl
+
+RUN cd /patched && \
+	/usr/local/go-patched/bin/go build -o awesome.so -buildmode=c-shared awesome.go && \
+	gcc -o client1 client1.c ./awesome.so && \
+	gcc -o client2 client2.c -ldl
+
+# Build the final image
+
+FROM alpine:3.19
+
+COPY --from=builder /unpatched/ /unpatched/
+COPY --from=builder /patched /patched/
+
+WORKDIR /src
+
+COPY entrypoint.sh /src/entrypoint.sh
+RUN chmod +x /src/entrypoint.sh
+
+CMD ["/entrypoint.sh"]
