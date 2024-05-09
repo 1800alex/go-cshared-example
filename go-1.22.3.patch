@@ -58,14 +58,6 @@ diff --git a/src/runtime/cgo/gcc_libinit.c b/src/runtime/cgo/gcc_libinit.c
 index 68f4a02379..cb89b46244 100644
 --- a/src/runtime/cgo/gcc_libinit.c
 +++ b/src/runtime/cgo/gcc_libinit.c
-@@ -6,6 +6,7 @@
- 
- #include <pthread.h>
- #include <errno.h>
-+#include <features.h>
- #include <stdio.h>
- #include <stdlib.h>
- #include <string.h> // strerror
 @@ -28,6 +29,20 @@ void (*x_crosscall2_ptr)(void (*fn)(void *), void *, int, size_t);
  // The context function, used when tracing back C calls into Go.
  static void (*cgo_context_function)(struct context_arg*);
