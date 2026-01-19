@@ -10,6 +10,10 @@ This repo contains 2 c programs, client 1 is linked at compile time and client 2
 
 I have a patch to partially fix this issue [github.com/golang/go/pull/67254](https://github.com/golang/go/pull/67254) that is applied to the go source tree inside both docker containers. Both clients are first compiled with an unpatched go source tree and again with a patched source tree to ensure the ubuntu (glibc) behaves properly with the patch applied.
 
+## existing issues
+
+The TLS issue with alpine (musl) is not fully resolved with the patch above, so client 2 still fails to load the go archive even after the patch is applied. Client 1 works as expected after the patch is applied. Those issues are being tracked here [github.com/golang/go/issues/54805](https://github.com/golang/go/issues/54805) and [https://go-review.googlesource.com/c/go/+/696635](https://go-review.googlesource.com/c/go/+/696635)
+
 
 ### ubuntu docker image
 
