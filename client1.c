@@ -27,4 +27,5 @@ int main() {
     Log(msg);
 
     PrintProgramArguments();
+    PrintProgramEnvironment();
 }

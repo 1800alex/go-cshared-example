@@ -71,8 +71,17 @@ int main(int argc, char **argv) {
         fputs(error, stderr);
         exit(1);
     }
-    // call Log
+
+    // resolve PrintProgramEnvironment symbol
+    go_int (*printProgramEnvironment)() = dlsym(handle, "PrintProgramEnvironment");
+    if ((error = dlerror()) != NULL)  {
+        fputs(error, stderr);
+        exit(1);
+    }
+    
+    // call shared methods
     printProgramArguments();
+    printProgramEnvironment();
     
     // close file handle when done
     dlclose(handle);

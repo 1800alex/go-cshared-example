@@ -31,6 +31,15 @@ arg 2: ipsum
 arg 3: dolor
 arg 4: sit
 arg 5: amet
+Program has 8 environment variables
+env 0: HOSTNAME=0782ec67a336
+env 1: SHLVL=0
+env 2: HOME=/root
+env 3: OLDPWD=/
+env 4: _=./entrypoint.sh
+env 5: TERM=xterm
+env 6: PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+env 7: PWD=/unpatched
 
 ==========================
 
@@ -46,6 +55,15 @@ arg 2: ipsum
 arg 3: dolor
 arg 4: sit
 arg 5: amet
+Program has 8 environment variables
+env 0: HOSTNAME=0782ec67a336
+env 1: SHLVL=0
+env 2: HOME=/root
+env 3: OLDPWD=/
+env 4: _=./entrypoint.sh
+env 5: TERM=xterm
+env 6: PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+env 7: PWD=/unpatched
 
 ==========================
 
@@ -62,6 +80,15 @@ arg 2: ipsum
 arg 3: dolor
 arg 4: sit
 arg 5: amet
+Program has 8 environment variables
+env 0: HOSTNAME=0782ec67a336
+env 1: SHLVL=0
+env 2: HOME=/root
+env 3: OLDPWD=/unpatched
+env 4: _=./entrypoint.sh
+env 5: TERM=xterm
+env 6: PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+env 7: PWD=/patched
 
 ==========================
 
@@ -77,6 +104,15 @@ arg 2: ipsum
 arg 3: dolor
 arg 4: sit
 arg 5: amet
+Program has 8 environment variables
+env 0: HOSTNAME=0782ec67a336
+env 1: SHLVL=0
+env 2: HOME=/root
+env 3: OLDPWD=/unpatched
+env 4: _=./entrypoint.sh
+env 5: TERM=xterm
+env 6: PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+env 7: PWD=/patched
 
 ==========================
 ```
@@ -111,6 +147,14 @@ arg 2: ipsum
 arg 3: dolor
 arg 4: sit
 arg 5: amet
+Program has 7 environment variables
+env 0: HOSTNAME=9d24b58d8bd1
+env 1: SHLVL=2
+env 2: HOME=/root
+env 3: OLDPWD=/unpatched
+env 4: TERM=xterm
+env 5: PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+env 6: PWD=/patched
 
 ==========================
 
