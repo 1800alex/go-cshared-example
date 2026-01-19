@@ -1,0 +1,283 @@
+diff --git a/src/cmd/cgo/internal/testcarchive/testdata/libgo/libgo.go b/src/cmd/cgo/internal/testcarchive/testdata/libgo/libgo.go
+index 37b30c1463..3a0684e512 100644
+--- a/src/cmd/cgo/internal/testcarchive/testdata/libgo/libgo.go
++++ b/src/cmd/cgo/internal/testcarchive/testdata/libgo/libgo.go
+@@ -46,7 +46,11 @@ func DidMainRun() bool { return ranMain }
+ 
+ //export CheckArgs
+ func CheckArgs() {
+-	if len(os.Args) != 3 || os.Args[1] != "arg1" || os.Args[2] != "arg2" {
++	// Dynamic linkers which supply the library initialization functions with the
++	// main program's argc / argc should have 3 args here, else they should have
++	// none.
++	valid := (len(os.Args) == 3 && os.Args[1] == "arg1" && os.Args[2] == "arg2") || (len(os.Args) == 0)
++	if !valid {
+ 		fmt.Printf("CheckArgs: want [_, arg1, arg2], got: %v\n", os.Args)
+ 		os.Exit(2)
+ 	}
+diff --git a/src/runtime/cgo.go b/src/runtime/cgo.go
+index eca905bad9..d5f024b025 100644
+--- a/src/runtime/cgo.go
++++ b/src/runtime/cgo.go
+@@ -12,6 +12,7 @@ import "unsafe"
+ 
+ //go:linkname _cgo_init _cgo_init
+ //go:linkname _cgo_thread_start _cgo_thread_start
++//go:linkname _cgo_sys_lib_args_valid _cgo_sys_lib_args_valid
+ //go:linkname _cgo_sys_thread_create _cgo_sys_thread_create
+ //go:linkname _cgo_notify_runtime_init_done _cgo_notify_runtime_init_done
+ //go:linkname _cgo_callers _cgo_callers
+@@ -24,6 +25,7 @@ import "unsafe"
+ var (
+ 	_cgo_init                     unsafe.Pointer
+ 	_cgo_thread_start             unsafe.Pointer
++	_cgo_sys_lib_args_valid       unsafe.Pointer
+ 	_cgo_sys_thread_create        unsafe.Pointer
+ 	_cgo_notify_runtime_init_done unsafe.Pointer
+ 	_cgo_callers                  unsafe.Pointer
+diff --git a/src/runtime/cgo/callbacks.go b/src/runtime/cgo/callbacks.go
+index 3c246a88b6..6a53f2b732 100644
+--- a/src/runtime/cgo/callbacks.go
++++ b/src/runtime/cgo/callbacks.go
+@@ -59,6 +59,14 @@ var _cgo_init = &x_cgo_init
+ var x_cgo_thread_start byte
+ var _cgo_thread_start = &x_cgo_thread_start
+ 
++// Determines if the argc / argv passed to the library initialization functions
++// are valid.
++//go:cgo_import_static x_cgo_sys_lib_args_valid
++//go:linkname x_cgo_sys_lib_args_valid x_cgo_sys_lib_args_valid
++//go:linkname _cgo_sys_lib_args_valid _cgo_sys_lib_args_valid
++var x_cgo_sys_lib_args_valid byte
++var _cgo_sys_lib_args_valid = &x_cgo_sys_lib_args_valid
++
+ // Creates a new system thread without updating any Go state.
+ //
+ // This method is invoked during shared library loading to create a new OS
+diff --git a/src/runtime/cgo/gcc_libinit.c b/src/runtime/cgo/gcc_libinit.c
+index e9b0a3f769..d3a850e271 100644
+--- a/src/runtime/cgo/gcc_libinit.c
++++ b/src/runtime/cgo/gcc_libinit.c
+@@ -35,6 +35,19 @@ void (*x_crosscall2_ptr)(void (*fn)(void *), void *, int, size_t);
+ // The context function, used when tracing back C calls into Go.
+ static void (*cgo_context_function)(struct context_arg*);
+ 
++// Detect if using glibc in order to make c-shared and c-archive builds work with dynamic linkers which
++// do not pass argc / argv to the library init functions such as musl and uClibc.
++int
++x_cgo_sys_lib_args_valid()
++{
++	// On Linux systems, uClibc does not pass argc/argv to libraries.
++#if !defined(__linux__) || (defined(__GLIBC__) && !defined(__UCLIBC__))
++	return 1;
++#else
++	return 0;
++#endif
++}
++
+ void
+ x_cgo_sys_thread_create(void* (*func)(void*), void* arg) {
+ 	pthread_attr_t attr;
+diff --git a/src/runtime/cgo/gcc_libinit_windows.c b/src/runtime/cgo/gcc_libinit_windows.c
+index 83fc874348..1edfb84785 100644
+--- a/src/runtime/cgo/gcc_libinit_windows.c
++++ b/src/runtime/cgo/gcc_libinit_windows.c
+@@ -64,6 +64,11 @@ _cgo_maybe_run_preinit() {
+ 	 }
+ }
+ 
++int
++x_cgo_sys_lib_args_valid() {
++	return 1;
++}
++
+ void
+ x_cgo_sys_thread_create(unsigned long (__stdcall *func)(void*), void* arg) {
+ 	_cgo_beginthread(func, arg);
+diff --git a/src/runtime/os_linux.go b/src/runtime/os_linux.go
+index fd560ddf5a..751ea25054 100644
+--- a/src/runtime/os_linux.go
++++ b/src/runtime/os_linux.go
+@@ -230,6 +230,8 @@ const (
+ )
+ 
+ var procAuxv = []byte("/proc/self/auxv\x00")
++var procCmdline = []byte("/proc/self/cmdline\x00")
++var procEnviron = []byte("/proc/self/environ\x00")
+ 
+ var addrspace_vec [1]byte
+ 
+@@ -237,24 +239,137 @@ func mincore(addr unsafe.Pointer, n uintptr, dst *byte) int32
+ 
+ var auxvreadbuf [128]uintptr
+ 
+-func sysargs(argc int32, argv **byte) {
+-	n := argc + 1
++// readProcNullSeparated reads a /proc file containing null-separated strings
++// and returns the count of strings and a pointer to allocated memory containing
++// an array of pointers to the strings, terminated by nil.
++// The string data itself is also persistently allocated.
++func readProcNullSeparated(path *byte) (count int32, ptrs **byte) {
++	// Read into a temporary stack buffer first
++	var tmpBuf [4096]byte
+ 
+-	// skip over argv, envp to get to auxv
+-	for argv_index(argv, n) != nil {
+-		n++
++	fd := open(path, 0 /* O_RDONLY */, 0)
++	if fd < 0 {
++		return 0, nil
+ 	}
+ 
+-	// skip NULL separator
+-	n++
++	n := read(fd, noescape(unsafe.Pointer(&tmpBuf[0])), int32(len(tmpBuf)))
++	closefd(fd)
++	if n <= 0 {
++		return 0, nil
++	}
+ 
+-	// now argv+n is auxv
+-	auxvp := (*[1 << 28]uintptr)(add(unsafe.Pointer(argv), uintptr(n)*goarch.PtrSize))
++	// Count null-separated strings
++	count = 0
++	for i := int32(0); i < n; i++ {
++		if tmpBuf[i] == 0 {
++			// Don't count empty strings or trailing nulls
++			if i == 0 || (i > 0 && tmpBuf[i-1] == 0) {
++				continue
++			}
++			count++
++		}
++	}
+ 
+-	if pairs := sysauxv(auxvp[:]); pairs != 0 {
+-		auxv = auxvp[: pairs*2 : pairs*2]
+-		return
++	if count == 0 {
++		return 0, nil
++	}
++
++	// Allocate persistent storage for the data
++	buf := (*byte)(persistentalloc(uintptr(n), 0, &memstats.other_sys))
++	memmove(unsafe.Pointer(buf), unsafe.Pointer(&tmpBuf[0]), uintptr(n))
++
++	// Allocate array of pointers (count + 1 for terminating nil)
++	ptrs = (**byte)(persistentalloc(uintptr(count+1)*goarch.PtrSize, 0, &memstats.other_sys))
++
++	// Fill in the pointers
++	idx := int32(0)
++	start := int32(0)
++	for i := int32(0); i < n && idx < count; i++ {
++		if *(*byte)(add(unsafe.Pointer(buf), uintptr(i))) == 0 {
++			if i > start {
++				// Found end of a string, point to it
++				*(**byte)(add(unsafe.Pointer(ptrs), uintptr(idx)*goarch.PtrSize)) = (*byte)(add(unsafe.Pointer(buf), uintptr(start)))
++				idx++
++			}
++			start = i + 1
++		}
++	}
++
++	// Null terminator
++	*(**byte)(add(unsafe.Pointer(ptrs), uintptr(count)*goarch.PtrSize)) = nil
++
++	return count, ptrs
++}
++
++func sysargs(argcIn int32, argvIn **byte) {
++	n := argcIn + 1
++
++	argsValid := true
++	if islibrary || isarchive {
++		if !sysLibArgsValid() {
++			argsValid = false
++		}
++	}
++
++	if argsValid {
++		// skip over argv, envp to get to auxv
++		for argv_index(argvIn, n) != nil {
++			n++
++		}
++
++		// skip NULL separator
++		n++
++
++		// now argv+n is auxv
++		auxvp := (*[1 << 28]uintptr)(add(unsafe.Pointer(argvIn), uintptr(n)*goarch.PtrSize))
++
++		if pairs := sysauxv(auxvp[:]); pairs != 0 {
++			auxv = auxvp[: pairs*2 : pairs*2]
++			return
++		}
++	} else {
++		// On musl/uClibc, argc/argv/envp are not reliably passed to libraries.
++		// Read them from /proc instead.
++		argcFromProc, argvFromProc := readProcNullSeparated(&procCmdline[0])
++		envc, envpFromProc := readProcNullSeparated(&procEnviron[0])
++
++		// Construct a combined argv array that includes:
++		// [argv[0], argv[1], ..., argv[argc-1], nil, envp[0], envp[1], ..., envp[envc-1], nil]
++		// This matches the expected layout for goenvs_unix()
++		totalPtrs := argcFromProc + 1 + envc + 1
++		combinedArgv := (**byte)(persistentalloc(uintptr(totalPtrs)*goarch.PtrSize, 0, &memstats.other_sys))
++
++		// Copy argv pointers
++		if argvFromProc != nil {
++			for i := int32(0); i < argcFromProc; i++ {
++				*(**byte)(add(unsafe.Pointer(combinedArgv), uintptr(i)*goarch.PtrSize)) =
++					*(**byte)(add(unsafe.Pointer(argvFromProc), uintptr(i)*goarch.PtrSize))
++			}
++		}
++
++		// Null separator after argv
++		*(**byte)(add(unsafe.Pointer(combinedArgv), uintptr(argcFromProc)*goarch.PtrSize)) = nil
++
++		// Copy envp pointers
++		if envpFromProc != nil {
++			for i := int32(0); i < envc; i++ {
++				*(**byte)(add(unsafe.Pointer(combinedArgv), uintptr(argcFromProc+1+i)*goarch.PtrSize)) =
++					*(**byte)(add(unsafe.Pointer(envpFromProc), uintptr(i)*goarch.PtrSize))
++			}
++		}
++
++		// Null terminator after envp
++		*(**byte)(add(unsafe.Pointer(combinedArgv), uintptr(argcFromProc+1+envc)*goarch.PtrSize)) = nil
++
++		// Update the package-level argc/argv globals so they're accessible
++		// to other runtime functions like goargs() and goenvs_unix()
++		argc = argcFromProc
++		argv = combinedArgv
++
++		// For musl/uClibc, we cannot rely on auxv being after envp in memory.
++		// Fall through to read from /proc/self/auxv below.
+ 	}
++	
+ 	// In some situations we don't get a loader-provided
+ 	// auxv, such as when loaded as a library on Android.
+ 	// Fall back to /proc/self/auxv.
+diff --git a/src/runtime/runtime1.go b/src/runtime/runtime1.go
+index 15b546783b..4e0b7828f7 100644
+--- a/src/runtime/runtime1.go
++++ b/src/runtime/runtime1.go
+@@ -57,6 +57,19 @@ var (
+ 	argv **byte
+ )
+ 
++// when using -buildmode=c-archive or -buildmode=c-shared on linux
++// we have to first make sure that glibc is being used or else
++// we cannot rely on argc/argv/auxv to be accurate
++func sysLibArgsValid() bool {
++	if _cgo_sys_lib_args_valid != nil {
++		ret := asmcgocall(_cgo_sys_lib_args_valid, nil)
++		if ret != 1 {
++			return false
++		}
++	}
++	return true
++}
++
+ // nosplit for use in linux startup sysargs.
+ //
+ //go:nosplit

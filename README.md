@@ -104,7 +104,13 @@ awesome.Add(12,99) = 111
 awesome.Cosine(1) = 0.540302
 awesome.Sort(77,12,5,99,28,23): 5,12,23,28,77,99,
 Hello from C!
-Program has 0 arguments
+Program has 6 arguments
+arg 0: ./client1
+arg 1: Lorem
+arg 2: ipsum
+arg 3: dolor
+arg 4: sit
+arg 5: amet
 
 ==========================
 
